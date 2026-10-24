@@ -8,7 +8,8 @@ faces, rig it with a skeleton made from its modules, pose it, and keep it in
 your asset library.
 
 - **Install:** in Blender 4.2 or later, Edit > Preferences > Get Extensions,
-  search for **Pythagoras Engine: Form**.
+  search for **Pythagoras Engine: Form**. Or get it from its page on
+  [Blender Extensions](https://extensions.blender.org/add-ons/pe-form/).
 - **Start:** in the 3D Viewport, Add > PE Formation and pick a start face;
   press **N** and open the **PE** tab.
 
