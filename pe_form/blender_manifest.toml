@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "pe_form"
+version = "1.1.0"
+name = "Pythagoras Engine: Form"
+tagline = "Build polyhedral formations from modules, face by face"
+maintainer = "Soboof"
+type = "add-on"
+website = "https://pythagorasengine.com/blender"
+tags = ["Add Mesh"]
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 Soboof"]
+
+[permissions]
+files = "Open and save formations and write them to an asset library"
+
+[build]
+paths_exclude_pattern = ["__pycache__/", ".*", "*.zip"]
