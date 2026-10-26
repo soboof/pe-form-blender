@@ -11,6 +11,12 @@ tests/test_engine.py holds it to the web engine's own answers.
 
 Carve (subtractive placement, engine/carve.py) is ported too.
 
+One thing is added to the web's placement: the shell is kept closed through
+the removals (engine/closure.py). The web draws a triangle soup, where a face
+the cancellation or the purge wrongly takes out is invisible; the Blender mesh
+shows it as an opening. It runs after the web's own steps and only puts faces
+back, so `open_faces`, its order and every seat verdict are the web's.
+
 Not ported (yet): custom Factory modules (connectors, bores, pin joints),
 face division, deleting a module from the middle. A web save that uses them
 opens up to the first such step and says why it stopped.
@@ -25,10 +31,15 @@ from .geom import (cen3, nor3, face_key, get_edge, get_scale, cen_n, nor_n, buil
 from .modules import MOD_DATA, MODULES, MODULE_BY_ID
 from .snap import snap_transform, pick_conn_face
 from .collision import check_intersection, ModuleWorldData
+from .closure import faces_to_close
 from .carve import (shell_crosses, coplanar_cover, cut_polygon, ring_around, face_on_polygon, valence_damage,
                     poly_normal, split_at_points)
 from .jsnum import to_fixed
 from .divide import subdivide_polygon, is_parallelogram, split_along_segments, DIVIDE_MAX, DIVIDE_MIN_FINE
+
+# Two corners closer than this many module edges are one corner when the
+# shell's edges are counted (meshplan.JOIN: the mesh joins them the same).
+CLOSE_TOL = 1e-3
 
 DIVIDE_STEP = "__divide__"
 # A module placed on a face modelled in Blender (an extruded face): not a face
@@ -1045,6 +1056,7 @@ class BuilderEngine:
         # candidates is the web's first match. Removed faces are marked and
         # dropped at the end, which leaves the others in the web's order.
         faces = self.all_faces
+        before = list(faces)
         alive = [True] * len(faces)
         lim = E * 0.06
         buckets = {}
@@ -1098,6 +1110,13 @@ class BuilderEngine:
 
         self._purge_interior_faces((w_verts, md.faces))
         self._purge_sealed_pockets()
+        # Not in the web engine. What the cancellation and the purges took
+        # out, bar the seat itself: put back below if it was all that closed
+        # an edge. That waits until the open faces are worked out, from the
+        # shell as the web leaves it.
+        left = {id(f) for f in self.all_faces}
+        taken = [f for f in before + new_mod_faces
+                 if id(f) not in left and not f.is_skirt and f.conn_type != "closed"]
 
         new_open = []
         if is_poly_module:
@@ -1138,6 +1157,7 @@ class BuilderEngine:
                     new_open.append(OpenFace([nf.va, nf.vb, nf.vc], cen3(nf.va, nf.vb, nf.vc), nor3(nf.va, nf.vb, nf.vc),
                                              3, mod_idx, nf.face_idx, conn_type=nf.conn_type or "open",
                                              conn_tag=nf.conn_tag or None))
+        self.all_faces = self.all_faces + faces_to_close(self.all_faces, taken, E * CLOSE_TOL)
         self._commit(ctx, new_open)
 
     def _build_skirt(self, ctx):
