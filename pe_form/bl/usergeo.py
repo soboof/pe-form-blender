@@ -27,6 +27,7 @@ skeleton's skin moves them with.
 
 import bmesh
 import numpy as np
+from mathutils.kdtree import KDTree
 
 from ..engine import frame as FR
 from ..engine.builder import OpenFace
@@ -272,6 +273,39 @@ def classify(bm, L, M, st, plan, tol):
         if v not in eng and v in out.moved:
             v[lb] = FR.apply(Mi, tuple(v.co))
     return out
+
+
+def unjoined(bm, L, e, faces):
+    """How many pairs of corners of the Form's own faces `faces` are one
+    corner kept in two copies: closer than the plan joins them (meshplan.
+    _join: JOIN of the edge of the smaller module) yet not one vertex.
+
+    The plan joins every such pair, so a mesh the Form wrote now has none. One
+    written before it did (a library asset, a file) keeps each module's own
+    copy of a corner a hair from the next module's: seen still nothing shows,
+    but the modules and their faces are loose from each other, and Subdivision
+    Surface, a skin or a bevel pulls them apart."""
+    edges = module_edges(e)
+    lm, lb = L["mod"], L["base"]
+    reach = {}
+    for f in faces:
+        r = JOIN * edges.get(f[lm] - 1, edges[-1])
+        for v in f.verts:
+            reach[v] = min(reach.get(v, r), r)
+    if len(reach) < 2:
+        return 0
+    vs = list(reach)
+    kd = KDTree(len(vs))
+    for i, v in enumerate(vs):
+        kd.insert(v[lb], i)
+    kd.balance()
+    far = max(reach.values())
+    n = 0
+    for i, v in enumerate(vs):
+        for _, j, d in kd.find_range(v[lb], far):
+            if j > i and d <= min(reach[v], reach[vs[j]]):
+                n += 1
+    return n
 
 
 def taken_open(plan_items, intact):

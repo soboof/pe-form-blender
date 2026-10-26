@@ -132,6 +132,9 @@ class Formation:
         self.mesh_plan = None
         self.taken_open = set()
         self.sealed = []
+        # Pairs of the Form's corners the mesh keeps as separate copies
+        # (usergeo.unjoined), found the last time its faces were sorted.
+        self.unjoined = 0
         self.dirty = True
 
     @classmethod
@@ -390,6 +393,7 @@ def refresh(obj):
     L = usergeo.layers(bm, NAMES)
     srt = usergeo.classify(bm, L, f.frame, st, f.mesh_plan, _tol(st.engine))
     f.taken_open = usergeo.taken_open(f.plan_items, srt.intact)
+    f.unjoined = usergeo.unjoined(bm, L, st.engine, srt.engine)
     f.dirty = False
     return f
 

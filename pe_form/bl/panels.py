@@ -5,7 +5,9 @@ shown while a formation is in Edit Mode.
               headset), + Add / - Carve, Undo, Edit (Restart), Export, and the
               HUD's count, Height X and hint, and the origin, which is the
               web's base plate (on the selected face or vertices, or back
-              on the seed plane); Settings under it
+              on the seed plane), and, for a mesh whose modules' corners
+              are not joined (written before the Form joined them), a
+              warning with Join Modules; Settings under it
   Parameters  the web's face card: the face (or faces) picked in Edit Mode,
               Select Same Kind, Height X, Conn. Face (whole or sub-seat, and
               which face of the module), Turn, Divide face (a triangle or
@@ -119,6 +121,12 @@ class PE_PT_form(_FormPanel, bpy.types.Panel):
         tips = TIPS_EMPTY if e.module_count == 0 else TIPS_BUILDING
         hint, err = st.hint(tips[(e.module_count // 3) % len(tips)], check)
         _wrap(box, hint, alert=err)
+        if f.unjoined:
+            # A mesh written before the Form joined corners: its modules are loose from each other.
+            box = lay.box()
+            _wrap(box, "The modules are not joined: each keeps its own copy of the corners it meets "
+                       "(%d). Subdivision Surface opens them up." % f.unjoined, alert=True)
+            box.operator("pe.join_modules", icon="AUTOMERGE_ON")
         # The origin is the base plate it stands on.
         row = lay.row(align=True)
         row.label(text="Origin", icon="OBJECT_ORIGIN")
@@ -391,6 +399,7 @@ class PE_MT_edit(bpy.types.Menu):
             r.label(text="%s %s (not in the add-on yet)" % (glyph, label))
         # The plate is the origin here (Origin to Plate, or Blender's Set Origin).
         lay.operator("pe.origin_plate", text="⊥ Plate: Origin to Plate")
+        lay.operator("pe.join_modules", icon="AUTOMERGE_ON")
         lay.separator()
         lay.operator("pe.restart", text="Restart", icon="FILE_REFRESH")
 

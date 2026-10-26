@@ -284,6 +284,28 @@ class PE_OT_undo(_EditOp, bpy.types.Operator):
         return {"FINISHED"}
 
 
+class PE_OT_join_modules(_EditOp, bpy.types.Operator):
+    """Join the corners where modules meet: a formation made before the Form joined them keeps each module's own copy of a corner, so its modules and faces are loose from each other. The formation is written again, joined; what you modelled on it stays"""
+    bl_idname = "pe.join_modules"
+    bl_label = "Join Modules"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        obj, f, st = _picked_state(context)
+        n = f.unjoined
+        if not n:
+            self.report({"INFO"}, "The modules are joined already")
+            return {"CANCELLED"}
+        write_mesh(obj, select=st.sel_idx)
+        f = follow_selection(obj)
+        _redraw(context)
+        if f.unjoined:
+            self.report({"WARNING"}, "%d corners are still apart: they are next to what you modelled" % f.unjoined)
+        else:
+            self.report({"INFO"}, "Joined %d corner%s" % (n, "" if n == 1 else "s"))
+        return {"FINISHED"}
+
+
 class PE_OT_restart(_EditOp, bpy.types.Operator):
     """Restart: empty the formation and start again from its start face"""
     bl_idname = "pe.restart"
@@ -800,7 +822,7 @@ class PE_OT_origin_seed(_EditOp, bpy.types.Operator):
         return {"FINISHED"}
 
 
-CLASSES = (PE_OT_add_formation, PE_OT_origin_plate, PE_OT_origin_seed, PE_OT_place, PE_OT_undo, PE_OT_restart, PE_OT_build_mode, PE_OT_set_module,
+CLASSES = (PE_OT_add_formation, PE_OT_origin_plate, PE_OT_origin_seed, PE_OT_place, PE_OT_undo, PE_OT_join_modules, PE_OT_restart, PE_OT_build_mode, PE_OT_set_module,
            PE_OT_set_side, PE_OT_step_side, PE_OT_divide, PE_OT_step_divide, PE_OT_seed, PE_OT_set_turn, PE_OT_step_turn, PE_OT_step_x, PE_OT_face_seat,
            PE_OT_select_same, PE_OT_setting, PE_OT_category, PE_OT_toggle_family, PE_OT_export, PE_OT_save_formation,
            PE_OT_open_formation, PE_OT_convert_to_mesh)
