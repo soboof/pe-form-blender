@@ -30,7 +30,7 @@ import numpy as np
 
 from ..engine import frame as FR
 from ..engine.builder import OpenFace
-from ..engine.meshplan import mesh_plan, to_bl, module_edges, join_tol, JOIN, THIN
+from ..engine.meshplan import mesh_plan, to_bl, join_reach, join_tol, THIN
 from ..engine.vec import Vec3
 
 ROLE_ATTR = "pe_role"
@@ -90,15 +90,16 @@ def plan_index(items):
 class Near:
     """Polygons by their points (plan keys: their corners), found from points
     that are each within reach of theirs: the corners the mesh plan joins
-    (meshplan._join) move by up to JOIN of their module's edge, and never by
-    THIN of the polygon's own shortest edge, so a polygon that is the same
-    one is found and no other is. A file saved before the corners were
-    joined keeps each module's own copy of a corner; so does a face kept
-    when the copy the plan joins to changes."""
+    (meshplan._join) move by up to their reach (meshplan.join_reach), and
+    never by THIN of the polygon's own shortest edge, so a polygon that is
+    the same one is found and no other is. A file saved before the corners
+    were joined (or, where a turn is off, joined again) keeps each module's
+    own copy of a corner; so does a face kept when the copy the plan joins
+    to changes."""
 
     def __init__(self, keys, e, tol):
         self.tol = tol
-        self.far = JOIN * max(module_edges(e).values())
+        self.far = max(join_reach(e).values())
         self.cell = max(self.far * 4, tol * 4, 1e-6)
         self.grid = {}
         for k in keys:
@@ -210,7 +211,7 @@ def classify(bm, L, M, st, plan, tol):
         by_centre[_round3(to_bl(o.center3))] = o
     Mi = FR.inverse(M)
     seats = []
-    edges = module_edges(e)
+    reaches = join_reach(e)
     rest = []
     for f in bm.faces:
         if not any(v in out.moved for v in f.verts):
@@ -248,7 +249,7 @@ def classify(bm, L, M, st, plan, tol):
             src = by_centre.get(_round3(tuple(f[L["src"]])))
             if src is not None:
                 seat = _translated(src, [FR.apply(Mi, tuple(v.co)) for v in f.verts], tol,
-                                   tol + join_tol(e, src.module_idx, edges))
+                                   tol + join_tol(e, src.module_idx, reaches))
         if seat is not None:
             f[L["role"]] = SEAT
             f[L["hex"]] = -1
@@ -312,8 +313,8 @@ def write_around(bm, L, M, st, old_plan, items, wid, select, sealed, tol):
         bmesh.ops.delete(bm, geom=loose_v, context="VERTS")
     Mi = FR.inverse(M)
     lb = L["base"]
-    edges = module_edges(e)
-    far = JOIN * max(edges.values())
+    reaches = join_reach(e)
+    far = max(reaches.values())
     # Vertices by their points, found within `tol` (a grid of cells and the
     # cells round them). A modelled vertex the Form's face lands on takes the
     # Form's exact point, so that face is the Form's again next time. One
@@ -357,7 +358,7 @@ def write_around(bm, L, M, st, old_plan, items, wid, select, sealed, tol):
     for i, h in enumerate(e.history):
         if h.free:
             covered.append((i + 1, [to_bl(Vec3(*v)) for v in h.free["v"]],
-                            tol + join_tol(e, h.free.get("m", -1), edges)))
+                            tol + join_tol(e, h.free.get("m", -1), reaches)))
     for f, _ in srt.seat:
         pts = [FR.apply(Mi, tuple(v.co)) for v in f.verts]
         hit = next((c for c in covered if _same_poly(pts, c[1], c[2])), None)

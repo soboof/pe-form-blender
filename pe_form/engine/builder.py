@@ -465,6 +465,9 @@ class BuilderEngine:
 
     def turn_options(self, mod_id, sel_idx, hexa_sub="cap", conn_sel=None):
         n = self.turn_steps(sel_idx)
+        # Whole degrees, as the web's Math.round: on a heptagon a turn sits up
+        # to half a degree off a perfect fit. Saves hold these, so they stay;
+        # the mesh closes the seams it leaves (meshplan.true_turns).
         all_ = [js_round((k * 360) / n) for k in range(n)]
         if sel_idx is None:
             return all_

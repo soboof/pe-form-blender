@@ -19,15 +19,26 @@ keeps its points (measured: all but 25 of 70,668 corners from step to step,
 those where a copy of an older module appeared; usergeo finds such a face
 again within the joining's reach).
 
+Copies land further apart where a turn is off: the turns on offer are
+whole degrees (the web's Math.round), so a module on a face whose exact
+turns are not (a heptagon's, 360/7) sits up to half a degree off a perfect
+fit. Its ring's corners land up to 8.6e-3 of an edge from the face's, and
+what is built on it meets the rest as far off or further, past JOIN, though
+the shell is closed there. A wider JOIN would close up the formation's own
+corners; instead the corners left on an open edge are joined again where
+exact turns would have put them (`true_turns`), which only a turn off moves.
+
 Engine Y-up to Blender Z-up: (x, y, z) is (x, -z, y).
 """
 
 import math
 
 from .geom import get_edge
+from .vec import Vec3, Quat
 
 JOIN = 1e-3   # two corners closer than this many module edges are one
 THIN = 0.1    # and never closer than this much of their polygon's shortest edge
+CRACK = 0.03  # copies a turn off parted are joined no further apart than this many edges
 
 
 def to_bl(v):
@@ -234,13 +245,113 @@ def module_edges(engine):
     return out
 
 
-def join_tol(engine, m, edges=None):
-    """How far a corner of module m's faces can be moved by the joining."""
+def _turn_off(deg, n):
+    """How many degrees a turn is past the nearest exact turn of an n-gon
+    (360 k / n): 0 on one, and for one more than half a degree off (no
+    rounding of an exact turn to whole degrees)."""
+    step = 360.0 / n
+    d = deg - step * round(deg / step)
+    return d if 1e-9 < abs(d) <= 0.5 + 1e-9 else 0.0
+
+
+def true_turns(engine):
+    """Where exact turns would have put each module, by history index: the
+    rigid motion (q, t), x -> q x + t, that takes it there, or None when it
+    is there already.
+
+    The engine's turns are whole degrees (BuilderEngine.turn_options, as the
+    web's Math.round), so on a face whose exact turns are not (a heptagon's,
+    360/7) a module sits up to half a degree off a perfect fit, and so does
+    everything built on it. The first module's turn on the seed does not
+    count: the seed is gone once it is placed."""
+    out = {}
+    for i, h in enumerate(engine.history):
+        c = out.get(h.parent_mod_idx)
+        f = h.used_face
+        o = h.orientation
+        d = 0.0
+        # (A hexagon on a hexagon's sixth turns about the whole hexagon, by
+        # sixths of a turn: whole degrees, as a triangle's thirds are.)
+        if h.parent_mod_idx >= 0 and isinstance(o, (int, float)) and math.isfinite(o) and len(f.verts3) >= 3:
+            d = _turn_off(o, len(f.verts3))
+        if d:
+            # snap_transform turns the module about the face's normal (the
+            # flipped one for a carve), through the face's centre.
+            n = f.normal3.clone().normalize()
+            if h.carve:
+                n.negate()
+            q = Quat().set_from_axis_angle(n, math.radians(-d))
+            t = f.center3.clone().sub(f.center3.clone().apply_quaternion(q))
+            if c is not None:
+                q, t = c[0].clone().multiply(q), t.apply_quaternion(c[0]).add(c[1])
+            c = (q, t)
+        out[i] = c
+    return out
+
+
+def join_reach(engine, edges=None):
+    """How far the joining may move a corner of each module's faces (by
+    history index, the seed's under -1): JOIN of its edge, and CRACK of the
+    largest edge more in a formation with a turn off (`true_turns`)."""
     edges = module_edges(engine) if edges is None else edges
-    return JOIN * edges.get(m, edges[-1])
+    turned = any(c is not None for c in true_turns(engine).values())
+    w = CRACK * max(edges.values()) if turned else 0.0
+    return {m: JOIN * E + w for m, E in edges.items()}
 
 
-def _join(plan, edges):
+def join_tol(engine, m, reach=None):
+    """How far a corner of module m's faces can be moved by the joining."""
+    reach = join_reach(engine) if reach is None else reach
+    return reach.get(m, reach[-1])
+
+
+def _snap(points, tol, mod, at=None, near=None):
+    """Each point to the point it joins, itself when it is kept, and how far
+    each point kept may join: taken oldest module first (one module's own, by
+    the point), each joins the nearest point kept before it no further from
+    it than both may (`tol`), measured where `at` has them (where they are,
+    without it), and only where `near(p, q)` allows."""
+    cell = max((tol[p] for p in points), default=0.0)
+    if cell <= 0:
+        return {p: p for p in points}, {p: tol[p] for p in points}
+    at = at if at is not None else {}
+    grid, keep, to = {}, {}, {}
+    for p in sorted(points, key=lambda p: (mod[p], p)):
+        x = at.get(p, p)
+        c = (math.floor(x[0] / cell), math.floor(x[1] / cell), math.floor(x[2] / cell))
+        best, bd = None, None
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    for q in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), ()):
+                        d = math.dist(x, at.get(q, q))
+                        if d <= min(tol[p], keep[q]) and (bd is None or d < bd) and (near is None or near(p, q)):
+                            best, bd = q, d
+        if best is None:
+            grid.setdefault(c, []).append(p)
+            keep[p] = tol[p]
+            to[p] = p
+        else:
+            keep[best] = min(keep[best], tol[p])
+            to[p] = best
+    return to, keep
+
+
+def _ring(pts, to):
+    """A polygon's corners as joined, or None when the joining closes it up."""
+    ids = []
+    for v in pts:
+        b = to[to_bl(v)]
+        if not ids or ids[-1] != b:
+            ids.append(b)
+    if len(ids) > 1 and ids[0] == ids[-1]:
+        ids.pop()
+    if len(ids) < 3 or len(set(ids)) != len(ids):
+        return None
+    return ids
+
+
+def _join(plan, edges, turns=None):
     """Every corner copy (an exact point) to the copy it is joined to.
 
     A copy may join another no further than JOIN of the edge of every module
@@ -249,8 +360,17 @@ def _join(plan, edges):
     oldest module first (one module's own, by the point), and each joins the
     nearest copy kept before it: the copy kept is the oldest module's, which
     a later placement seldom changes, whatever order the shell lists its
-    faces in."""
-    tol, mod = {}, {}
+    faces in.
+
+    With a turn off (`turns`, true_turns), the corners left on an open edge
+    are joined again by the same rule, measured where exact turns would have
+    put them. A corner moves no further than CRACK of its module's edge, nor
+    THIN of the shortest edge of a polygon at it (a thin face a turn off cut
+    is not closed up either, and usergeo finds the face again). Only corners
+    on an open edge, and never into an edge of more than two polygons: a
+    seam's faces are gone from the shell, while faces it kept are not closed
+    onto each other."""
+    tol, mod, thin = {}, {}, {}
     for pts, col, oi, hx, m in plan:
         b = [to_bl(v) for v in pts]
         short = min(math.dist(b[i], b[(i + 1) % len(b)]) for i in range(len(b)))
@@ -264,29 +384,54 @@ def _join(plan, edges):
             else:
                 tol[p] = min(tol[p], t)
                 mod[p] = min(mod[p], m)
-    cell = max(tol.values(), default=0.0)
-    to = {}
-    if cell <= 0:
-        return {p: p for p in tol}
-    grid, keep = {}, {}
-    for p in sorted(tol, key=lambda p: (mod[p], p)):
-        c = (math.floor(p[0] / cell), math.floor(p[1] / cell), math.floor(p[2] / cell))
-        best, bd = None, None
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    for q in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), ()):
-                        d = math.dist(p, q)
-                        if d <= min(tol[p], keep[q]) and (bd is None or d < bd):
-                            best, bd = q, d
-        if best is None:
-            grid.setdefault(c, []).append(p)
-            keep[p] = tol[p]
-            to[p] = p
-        else:
-            keep[best] = min(keep[best], tol[p])
-            to[p] = best
-    return to
+            if short > 0:
+                thin[p] = min(thin.get(p, math.inf), THIN * short)
+    to, keep = _snap(tol, tol, mod)
+    if not turns or all(c is None for c in turns.values()):
+        return to
+    rim = {p for e, n in _edges(plan, to).items() if n == 1 for p in e}
+    # How far a corner may move: every copy joined to it moves with it.
+    move = {}
+    for p, r in to.items():
+        if r in rim:
+            move[r] = min(move.get(r, math.inf), thin.get(p, math.inf))
+    at = {}
+    for p in rim:
+        c = turns.get(mod[p])
+        if c is not None:
+            at[p] = to_bl(Vec3(p[0], p[2], -p[1]).apply_quaternion(c[0]).add(c[1]))
+    veto = set()
+
+    def near(p, q):
+        # p moves to q, which stays.
+        return p not in veto and q not in veto and \
+            math.dist(p, q) <= min(CRACK * edges.get(mod[p], edges[-1]), move[p])
+
+    while True:
+        again, _ = _snap(rim, keep, mod, at, near)
+        joined = {p: again.get(t, t) for p, t in to.items()}
+        # Where a turn off left part of a wall uncancelled, both modules'
+        # pieces of it are in the shell: a corner joined there puts an edge
+        # in more than two polygons. Its newest copy stays apart, and the
+        # rest are joined again without it.
+        merged = {r for p, r in again.items() if r != p}
+        bad = {x for e, n in _edges(plan, joined).items() if n > 2 for x in e if x in merged}
+        if not bad:
+            return joined
+        for r in bad:
+            veto.add(max((p for p, k in again.items() if k == r and p != r), key=lambda p: (mod[p], p)))
+
+
+def _edges(plan, to):
+    """How many polygons each edge (a pair of joined corners) is in."""
+    count = {}
+    for pts, col, oi, hx, m in plan:
+        ids = _ring(pts, to) or ()
+        for k in range(len(ids)):
+            a, b = ids[k - 1], ids[k]
+            e = (a, b) if a < b else (b, a)
+            count[e] = count.get(e, 0) + 1
+    return count
 
 
 def mesh_plan(engine, mods=None):
@@ -294,7 +439,7 @@ def mesh_plan(engine, mods=None):
     Given a list as `mods`, it is filled with each polygon's module (its
     history index, -1 for none), in the order of `polys`."""
     plan = plan_polygons(engine)
-    to = _join(plan, module_edges(engine))
+    to = _join(plan, module_edges(engine), true_turns(engine))
     verts, index, polys, cols, opens, hexes = [], {}, [], [], [], []
     for pts, col, oi, hx, m in plan:
         ids = []
